@@ -8,7 +8,7 @@ namespace ViperBattery
 {
     internal static class Program
     {
-        internal const string AppName = "マウスのバッテリー";
+        internal const string AppName = "Mouse Battery Indicator";
         private const string InstanceName = @"Local\ViperV3BatteryIndicator.Instance";
         internal const string ShowEventName = @"Local\ViperV3BatteryIndicator.Show";
 

@@ -10,15 +10,17 @@
 
 [Setup]
 AppId={{43C99E74-72D4-4346-96A3-BA61DF9562D9}
-AppName=マウスのバッテリー
+AppName=Mouse Battery Indicator
 AppVersion={#AppVersion}
-AppVerName=マウスのバッテリー {#AppVersion}
+AppVerName=Mouse Battery Indicator {#AppVersion}
 AppPublisher=LaceCelestia
 AppPublisherURL=https://github.com/LaceCelestia/mouse-battery-indicator
 AppSupportURL=https://github.com/LaceCelestia/mouse-battery-indicator/issues
 AppUpdatesURL=https://github.com/LaceCelestia/mouse-battery-indicator/releases
 DefaultDirName={localappdata}\Programs\MouseBatteryIndicator
-DefaultGroupName=マウスのバッテリー
+DefaultGroupName=Mouse Battery Indicator
+UsePreviousGroup=no
+UpdateUninstallLogAppName=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 MinVersion=10.0
@@ -41,7 +43,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
 japanese.DesktopShortcut=デスクトップにショートカットを作成する
-japanese.LaunchApp=マウスのバッテリーを起動する
+japanese.LaunchApp=Mouse Battery Indicator を起動する
 japanese.DotNetRequired=このアプリには .NET Framework 4.8 以降が必要です。Microsoft の公式サイトからインストールした後、セットアップを実行してください。
 english.DesktopShortcut=Create a desktop shortcut
 english.LaunchApp=Launch Mouse Battery Indicator
@@ -56,8 +58,8 @@ Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "docs\はじめに.txt"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\マウスのバッテリー"; Filename: "{app}\MouseBatteryIndicator.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\マウスのバッテリー"; Filename: "{app}\MouseBatteryIndicator.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\Mouse Battery Indicator"; Filename: "{app}\MouseBatteryIndicator.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\Mouse Battery Indicator"; Filename: "{app}\MouseBatteryIndicator.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [InstallDelete]
 Type: files; Name: "{app}\ViperV3BatteryIndicator.exe"
@@ -193,6 +195,44 @@ begin
     Log('Could not update the existing installed startup entry.');
 end;
 
+procedure RemoveOwnedLegacyShortcut(ShortcutPath: String);
+var
+  Shell, Shortcut: Variant;
+  Target: String;
+begin
+  if not FileExists(ShortcutPath) then
+    Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Shortcut := Shell.CreateShortcut(ShortcutPath);
+    Target := Shortcut.TargetPath;
+    if (CompareText(Target, ExpandConstant('{app}\MouseBatteryIndicator.exe')) <> 0) and
+        (CompareText(Target, ExpandConstant('{app}\ViperV3BatteryIndicator.exe')) <> 0) then
+    begin
+      Log('Preserved a legacy-named shortcut for another executable: ' + ShortcutPath);
+      Exit;
+    end;
+    if DeleteFile(ShortcutPath) then
+      Log('Removed the previous product shortcut: ' + ShortcutPath)
+    else
+      Log('Could not remove the previous product shortcut: ' + ShortcutPath);
+  except
+    Log('Preserved a legacy-named shortcut because its target could not be read: ' + ShortcutPath);
+  end;
+end;
+
+procedure RemoveLegacyProductShortcuts;
+var
+  LegacyGroup: String;
+begin
+  LegacyGroup := ExpandConstant('{userprograms}\マウスのバッテリー');
+  RemoveOwnedLegacyShortcut(LegacyGroup + '\マウスのバッテリー.lnk');
+  RemoveOwnedLegacyShortcut(ExpandConstant('{autodesktop}\マウスのバッテリー.lnk'));
+  if DirExists(LegacyGroup) then
+    if RemoveDir(LegacyGroup) then
+      Log('Removed the empty previous Start Menu folder.');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
@@ -200,6 +240,7 @@ begin
     UpgradeInstalledStartupEntry(HKCU32);
     if IsWin64 then
       UpgradeInstalledStartupEntry(HKCU64);
+    RemoveLegacyProductShortcuts;
   end;
 end;
 
