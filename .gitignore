@@ -1,0 +1,9 @@
+dist/
+.work/
+artifacts/
+diagnostics*.txt
+settings*.xml
+*.user
+*.suo
+*.pdb
+*.log
