@@ -4,7 +4,7 @@ Mouse Battery Indicator
 Windows 10 / 11、.NET Framework 4.8
 
 インストール版
-1. GitHub の Releases から MouseBatteryIndicator-v1.1.2-Setup.exe をダウンロードします。
+1. GitHub の Releases から MouseBatteryIndicator-v1.0.0-Setup.exe をダウンロードします。
 2. Setup.exe を開き、画面に従ってインストールします。
 3. スタートメニューの「Mouse Battery Indicator」から起動できます。
 管理者権限は不要です。インストール先は自分のユーザーフォルダーです。
