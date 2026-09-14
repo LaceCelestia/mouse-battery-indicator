@@ -89,6 +89,7 @@ internal static class ServiceTests
                 Check(saved.PreferredDeviceId == oldSettings.PreferredDeviceId && saved.PreferredDeviceName == oldSettings.PreferredDeviceName, "Selected device survives the XML settings round trip");
             }
             TestScanFailures();
+            TestSettingsMigration();
             Console.WriteLine("PASS: " + assertions + " service assertions.");
             return 0;
         }
@@ -120,6 +121,36 @@ internal static class ServiceTests
             BatteryScan failed = service.Scan();
             Check(calls == 3 && failed.Readings.Single().Percentage == null && failed.Diagnostic.Contains("Driver unavailable"), "Late charge is discarded and a new provider error does not restore it");
             Check(service.Scan().Readings.Single().Percentage == null, "Out-of-range provider percentages are rejected");
+        }
+    }
+
+    private static void TestSettingsMigration()
+    {
+        string parent = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string temporary = Path.Combine(parent, "MouseBatterySettingsTest-" + Guid.NewGuid().ToString("N"));
+        string legacy = Path.Combine(temporary, "old");
+        string current = Path.Combine(temporary, "new");
+        try
+        {
+            Directory.CreateDirectory(legacy);
+            string oldFile = Path.Combine(legacy, "settings.xml");
+            string xml = "<ViperV3BatteryIndicatorSettings><PollSeconds>30</PollSeconds><IconColor>white</IconColor><IconWeight>bold</IconWeight><LowBatteryNotification>false</LowBatteryNotification><PreferredDeviceId>razer:one</PreferredDeviceId><PreferredDeviceName>Saved Mouse</PreferredDeviceName></ViperV3BatteryIndicatorSettings>";
+            File.WriteAllText(oldFile, xml);
+            AppSettings migrated = AppSettings.LoadFromDirectories(current, legacy);
+            Check(migrated.PollSeconds == 30 && migrated.IconColor == "white" && migrated.IconWeight == "bold", "Legacy appearance settings migrate to the generic directory");
+            Check(!migrated.LowBatteryNotification && migrated.PreferredDeviceId == "razer:one", "Migration preserves notifications and selected mouse");
+            Check(File.Exists(Path.Combine(current, "settings.xml")), "Migration saves settings in the new directory");
+            Check(File.ReadAllText(oldFile) == xml, "Migration leaves the original settings intact");
+            migrated.PollSeconds = 120;
+            migrated.SaveToDirectory(current);
+            Check(AppSettings.LoadFromDirectories(current, legacy).PollSeconds == 120, "Existing new settings take priority over the legacy copy");
+            Check(AppSettings.LoadFromDirectories(Path.Combine(temporary, "absent"), Path.Combine(temporary, "also-absent")).PollSeconds == 60, "Fresh installations retain defaults");
+        }
+        finally
+        {
+            string resolved = Path.GetFullPath(temporary);
+            if (!resolved.StartsWith(parent, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsafe settings test cleanup path");
+            if (Directory.Exists(resolved)) Directory.Delete(resolved, true);
         }
     }
 }

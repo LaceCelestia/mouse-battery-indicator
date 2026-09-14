@@ -35,7 +35,7 @@ namespace ViperBattery
             get
             {
                 return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "ViperV3BatteryIndicator");
+                    "MouseBatteryIndicator");
             }
         }
 
@@ -46,7 +46,15 @@ namespace ViperBattery
 
         public static AppSettings Load()
         {
-            string path = SettingsPath;
+            return LoadFromDirectories(SettingsDirectory, Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ViperV3BatteryIndicator"));
+        }
+
+        internal static AppSettings LoadFromDirectories(string directory, string legacyDirectory)
+        {
+            string path = Path.Combine(directory, "settings.xml");
+            bool migrate = !File.Exists(path);
+            if (migrate) path = Path.Combine(legacyDirectory, "settings.xml");
             try
             {
                 if (!File.Exists(path))
@@ -63,6 +71,13 @@ namespace ViperBattery
                     if (result == null)
                         return new AppSettings();
                     result.Sanitize();
+                    if (migrate)
+                    {
+                        try { result.SaveToDirectory(directory); }
+                        catch (IOException) { }
+                        catch (UnauthorizedAccessException) { }
+                        catch (SecurityException) { }
+                    }
                     return result;
                 }
             }
@@ -76,9 +91,13 @@ namespace ViperBattery
 
         public void Save()
         {
+            SaveToDirectory(SettingsDirectory);
+        }
+
+        internal void SaveToDirectory(string directory)
+        {
             Sanitize();
-            string directory = SettingsDirectory;
-            string path = SettingsPath;
+            string path = Path.Combine(directory, "settings.xml");
             Directory.CreateDirectory(directory);
             string temporaryPath = Path.Combine(directory, "settings." + Guid.NewGuid().ToString("N") + ".tmp");
             try
@@ -125,7 +144,7 @@ namespace ViperBattery
             try
             {
                 if (File.Exists(path))
-                    File.Move(path, Path.Combine(SettingsDirectory,
+                    File.Move(path, Path.Combine(Path.GetDirectoryName(path),
                         "settings.corrupt." + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + ".xml"));
             }
             catch (IOException) { }
@@ -137,7 +156,8 @@ namespace ViperBattery
     public static class StartupRegistration
     {
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        private const string ValueName = "ViperV3BatteryIndicator";
+        private const string ValueName = "MouseBatteryIndicator";
+        private const string LegacyValueName = "ViperV3BatteryIndicator";
 
         private static string StartupCommand
         {
@@ -152,8 +172,8 @@ namespace ViperBattery
                 {
                     using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, false))
                     {
-                        string value = key == null ? null : key.GetValue(ValueName) as string;
-                        return string.Equals(value, StartupCommand, StringComparison.OrdinalIgnoreCase);
+                        return key != null && (String.Equals(key.GetValue(ValueName) as string, StartupCommand, StringComparison.OrdinalIgnoreCase)
+                            || String.Equals(key.GetValue(LegacyValueName) as string, StartupCommand, StringComparison.OrdinalIgnoreCase));
                     }
                 }
                 catch (IOException) { return false; }
@@ -171,6 +191,7 @@ namespace ViperBattery
                     if (key == null)
                         throw new IOException("Windows startup registry key is unavailable.");
                     key.SetValue(ValueName, StartupCommand, RegistryValueKind.String);
+                    RemoveLegacyEntry(key);
                 }
             }
             else
@@ -178,9 +199,22 @@ namespace ViperBattery
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, true))
                 {
                     if (key != null)
-                        key.DeleteValue(ValueName, false);
+                    {
+                        if (String.Equals(key.GetValue(ValueName) as string, StartupCommand, StringComparison.OrdinalIgnoreCase))
+                            key.DeleteValue(ValueName, false);
+                        RemoveLegacyEntry(key);
+                    }
                 }
             }
+        }
+
+        private static void RemoveLegacyEntry(RegistryKey key)
+        {
+            string value = key.GetValue(LegacyValueName) as string;
+            string legacyCommand = "\"" + Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "ViperV3BatteryIndicator.exe") + "\" --background";
+            if (String.Equals(value, StartupCommand, StringComparison.OrdinalIgnoreCase)
+                || String.Equals(value, legacyCommand, StringComparison.OrdinalIgnoreCase))
+                key.DeleteValue(LegacyValueName, false);
         }
     }
 }

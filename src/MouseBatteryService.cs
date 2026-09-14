@@ -19,10 +19,12 @@ namespace ViperBattery
         {
             RazerBatteryReader razer = new RazerBatteryReader();
             LogitechBatteryReader logitech = new LogitechBatteryReader();
+            XenicsBatteryReader xenics = new XenicsBatteryReader();
             WindowsBatteryReader windows = new WindowsBatteryReader();
             providers = new[] {
                 new ProviderSlot("Razer", razer.Scan),
                 new ProviderSlot("Logitech", logitech.Scan),
+                new ProviderSlot("Xenics", xenics.Scan),
                 new ProviderSlot("Windows", windows.Scan)
             };
         }

@@ -12,7 +12,7 @@ $artifactDirectory = Join-Path $projectDirectory 'artifacts'
 
 # Build in .work so packaging never replaces the running application in dist.
 & (Join-Path $projectDirectory 'build.ps1') -Test:$Test -StageOnly
-$stagedExecutable = Join-Path $workDirectory 'ViperV3BatteryIndicator.exe'
+$stagedExecutable = Join-Path $workDirectory 'MouseBatteryIndicator.exe'
 $assemblyVersion = [System.Reflection.AssemblyName]::GetAssemblyName($stagedExecutable).Version
 $packageVersion = '{0}.{1}.{2}' -f $assemblyVersion.Major, $assemblyVersion.Minor, $assemblyVersion.Build
 if ($assemblyVersion.Revision -gt 0) {
@@ -24,7 +24,7 @@ $packagePath = Join-Path $artifactDirectory $packageName
 $hashPath = "$packagePath.sha256"
 $firstStepsRelativePath = 'docs/' + (-join [char[]]@(0x306F, 0x3058, 0x3081, 0x306B)) + '.txt'
 $includedFiles = @(
-    [pscustomobject]@{ Source = $stagedExecutable; RelativePath = 'ViperV3BatteryIndicator.exe' },
+    [pscustomobject]@{ Source = $stagedExecutable; RelativePath = 'MouseBatteryIndicator.exe' },
     [pscustomobject]@{ Source = (Join-Path $projectDirectory 'README.md'); RelativePath = 'README.md' },
     [pscustomobject]@{ Source = (Join-Path $projectDirectory $firstStepsRelativePath); RelativePath = $firstStepsRelativePath }
 )

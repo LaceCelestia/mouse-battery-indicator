@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -26,6 +28,7 @@ namespace ViperBattery
         private string notificationDeviceId;
         private Icon currentIcon;
         private bool refreshing;
+        private bool savingDiagnostics;
         private bool lowBatteryNotified;
         private volatile bool stopping;
 
@@ -197,6 +200,9 @@ namespace ViperBattery
             };
             menu.Items.Add(startup);
             menu.Items.Add(new ToolStripSeparator());
+            ToolStripMenuItem diagnostics = new ToolStripMenuItem("診断結果を保存");
+            diagnostics.Click += delegate { SaveDiagnostics(); };
+            menu.Items.Add(diagnostics);
             menu.Items.Add("使い方", null, delegate
             {
                 MessageBox.Show("タスクバー右側の数字が、マウスのバッテリー残量（%）です。\n\n数字が見つからない場合は、通知領域の「隠れているインジケーターを表示」（∧）を開き、数字をタスクバーへドラッグしてください。\n\n左クリック：機種名・残量・充電状態\n右クリック → 表示するマウス：表示対象を選択\n\n数字の下の緑の線は充電中の表示です。\n「--」は数値を取得できない状態です。残量を段階で返す機種は、詳細画面にその段階を表示します。", Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -211,6 +217,7 @@ namespace ViperBattery
                 for (int i = 0; i < weightValues.Length; i++) ((ToolStripMenuItem)weight.DropDownItems[i]).Checked = weightValues[i] == settings.IconWeight;
                 notifications.Checked = settings.LowBatteryNotification;
                 startup.Checked = StartupRegistration.IsEnabled;
+                diagnostics.Enabled = !savingDiagnostics;
             };
             tray.ContextMenuStrip = menu;
             if (previous != null) previous.Dispose();
@@ -253,6 +260,40 @@ namespace ViperBattery
             SaveSettings();
             ApplySelection();
             Refresh();
+        }
+
+        private void SaveDiagnostics()
+        {
+            if (savingDiagnostics || stopping) return;
+            string destination;
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = "診断結果を保存";
+                dialog.Filter = "テキストファイル (*.txt)|*.txt";
+                dialog.DefaultExt = "txt";
+                dialog.FileName = "mouse-battery-diagnostics.txt";
+                if (dialog.ShowDialog() != DialogResult.OK) return;
+                destination = dialog.FileName;
+            }
+            savingDiagnostics = true;
+            Task.Factory.StartNew(delegate
+            {
+                string errorMessage = null;
+                try
+                {
+                    string report = "Mouse Battery Indicator " + Application.ProductVersion + " - " + DateTime.Now.ToString("s")
+                        + Environment.NewLine + "Last battery scan:" + Environment.NewLine + reader.Diagnose()
+                        + Environment.NewLine + HidInventory.Diagnose();
+                    File.WriteAllText(destination, report, new UTF8Encoding(true));
+                }
+                catch (Exception error) { AppLog.Write(error); errorMessage = error.Message; }
+                Dispatch(delegate
+                {
+                    savingDiagnostics = false;
+                    if (errorMessage != null)
+                        MessageBox.Show("診断結果を保存できませんでした。\n" + errorMessage, Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                });
+            });
         }
 
         private void SaveSettings()

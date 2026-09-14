@@ -38,7 +38,7 @@ if (-not $?) {
     throw 'Portable packaging failed; the installer was not built.'
 }
 
-$stagedExecutable = Join-Path $projectRoot '.work\ViperV3BatteryIndicator.exe'
+$stagedExecutable = Join-Path $projectRoot '.work\MouseBatteryIndicator.exe'
 $assemblyVersion = [Reflection.AssemblyName]::GetAssemblyName($stagedExecutable).Version
 $version = '{0}.{1}.{2}' -f $assemblyVersion.Major, $assemblyVersion.Minor, $assemblyVersion.Build
 if ($assemblyVersion.Revision -gt 0) {

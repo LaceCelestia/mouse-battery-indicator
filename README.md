@@ -4,9 +4,9 @@
 
 ## 使い方
 
-[最新版をダウンロード](https://github.com/LaceCelestia/mouse-battery-indicator/releases/latest)し、`MouseBatteryIndicator-v1.1.0-Setup.exe` を開いてインストールします。管理者権限は不要です。インストール後はスタートメニューの「マウスのバッテリー」から起動できます。
+[最新版をダウンロード](https://github.com/LaceCelestia/mouse-battery-indicator/releases/latest)し、`MouseBatteryIndicator-v1.1.1-Setup.exe` を開いてインストールします。管理者権限は不要です。インストール後はスタートメニューの「マウスのバッテリー」から起動できます。
 
-インストールせず使う場合は、同じページの `MouseBatteryIndicator-v1.1.0-windows.zip` を展開し、`ViperV3BatteryIndicator.exe` を開きます。GitHub の「Source code」は開発用ソースなので、通常は Setup.exe を選んでください。
+インストールせず使う場合は、同じページの `MouseBatteryIndicator-v1.1.1-windows.zip` を展開し、`MouseBatteryIndicator.exe` を開きます。GitHub の「Source code」は開発用ソースなので、通常は Setup.exe を選んでください。
 
 - 数字が隠れている場合は、通知領域の「∧」を開き、数字をタスクバーへドラッグします。
 - 左クリックで機種名・残量・充電状態を表示します。
@@ -24,9 +24,12 @@
 | --- | --- |
 | Razer 専用通信 | 下記の既知モデルの USB 有線／受信機接続。充電式機種では充電状態も取得。 |
 | Logitech / ロジクール HID++ 2.0 | USB 接続または受信機経由で、マウス識別と対応バッテリー機能を公開する機種。受信機のスロット 1〜6 を探索。 |
+| Xenics TITAN GE AIR 用の取得処理（試験対応） | 公式ソフトの残量照会に基づく USB／受信機の取得処理。**実機未確認**。対象 ID は `25A7:FA7B` / `25A7:FA7C`。対応レポートを持つ機器に限る。 |
 | Windows の Bluetooth 残量 | メーカーを問わず、Windows が残量を公開する Bluetooth マウス。充電状態は取得不可。 |
 
 すべてのマウスに共通する取得方法はありません。旧 HID++ 1.0、残量を公開しない機種、未対応メーカーの独自 USB 受信機は対象外です。Bluetooth で使うロジクール製マウスは Windows 側の取得条件に従います。
+
+TITAN GE AIR の取得処理は、実機での検証が必要です。メーカーソフトによる初期化が必要なファームウェアでは取得できない可能性があります。同じ USB ID を使う別機種もあるため、表示名には USB の製品名を使い、ID だけで TITAN GE AIR と決めつけません。[実装の根拠と未確認事項](https://github.com/LaceCelestia/mouse-battery-indicator/blob/main/docs/xenics-protocol.md)。
 
 Razer の対応モデル（USB PID 34 種類）：
 
@@ -52,7 +55,7 @@ Logitech は機種名の固定リストではなく、HID++ の対応機能を�
 
 - Windows 10 / 11、.NET Framework 4.8 を使用します。追加パッケージや実行時のネットワーク接続は不要です。
 - **Razer Viper V3 Pro の受信機（VID `1532` / PID `00C1`）で実機確認済み**。2026-09-14、複数メーカー対応版でも残量・充電状態を読み取り、応答のチェックサムが一致しました。Razer ドライバーが入っている環境で確認しています。
-- ロジクール、Bluetooth マウス、上記以外の Razer は実機未検証です。プロトコル応答・複数台の識別・切断・タイムアウトはテスト用データで検証しています。
+- TITAN GE AIR、ロジクール、Bluetooth マウス、上記以外の Razer は実機未検証です。プロトコル応答・複数台の識別・切断・タイムアウトはテスト用データで検証しています。
 - この PC にある Bluetooth 機器を、誤ってマウスとして表示しないことを確認しています。
 
 ## 設定
@@ -67,7 +70,7 @@ Logitech は機種名の固定リストではなく、HID++ の対応機能を�
 | 残量 20% 以下で通知 | 初期値はオン。充電中は通知しません。 |
 | Windows 起動時に実行 | 初期値はオフ。 |
 
-設定の保存先は `%LOCALAPPDATA%\ViperV3BatteryIndicator\settings.xml` です。以前の色・太さ・更新間隔などを引き継ぎます。既存の自動起動設定との互換性のため、実行ファイル名と設定フォルダー名は従来のままです。
+設定の保存先は `%LOCALAPPDATA%\MouseBatteryIndicator\settings.xml` です。旧版の設定は初回起動時に引き継ぎ、元の設定ファイルも残します。インストール版の更新では、同じインストール先の自動起動設定と、Windows 側で無効にしていた状態を引き継ぎます。
 
 自動起動を有効にしたあとで exe を移動するときは、移動前に設定をオフにし、移動先のアプリで再度オンにします。
 
@@ -79,9 +82,9 @@ Logitech は機種名の固定リストではなく、HID++ の対応機能を�
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Test
 ```
 
-`dist\ViperV3BatteryIndicator.exe` を作成します。`-StageOnly` を付けると、実行中の dist を置き換えず `.work` にビルドできます。
+`dist\MouseBatteryIndicator.exe` を作成します。`-StageOnly` を付けると、実行中の dist を置き換えず `.work` にビルドできます。
 
-検証内容：Razer / HID++ の応答照合・値の解釈、Windows 機器と残量の対応付け、マウスの選択、古い値の破棄、ネイティブ I/O のキャンセル、表示とアイコン資源の解放。
+検証内容：Razer / HID++ / Xenics の応答照合・値の解釈、Windows 機器と残量の対応付け、マウスの選択、古い値の破棄、ネイティブ I/O のキャンセル、旧設定の移行、配布 exe の製品名と取得処理の同梱、表示とアイコン資源の解放。
 
 ## 配布用ファイルの作成
 
@@ -103,20 +106,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1 -Test
 
 ## 取得できない場合
 
-マウスを動かしてから「今すぐ更新」を押します。接続方式と上記の対応範囲も確認してください。次のコマンドで全取得方式の診断結果を保存できます。
+マウスを動かしてから「今すぐ更新」を押します。接続方式と上記の対応範囲も確認してください。右クリック →「診断結果を保存」で、直近の取得結果と接続中の HID 機器のメーカー・製品 ID をテキストに保存できます。
+
+コマンドから改めて取得する場合：
 
 ```powershell
-Start-Process .\dist\ViperV3BatteryIndicator.exe -ArgumentList '--diagnose diagnostics.txt' -WindowStyle Hidden -Wait
+Start-Process .\dist\MouseBatteryIndicator.exe -ArgumentList '--diagnose diagnostics.txt' -WindowStyle Hidden -Wait
 Get-Content .\diagnostics.txt -Encoding UTF8
 ```
 
-例外ログは `%LOCALAPPDATA%\ViperV3BatteryIndicator\app.log` です。
+例外ログは `%LOCALAPPDATA%\MouseBatteryIndicator\app.log` です。
 
 ## 削除
 
 アプリを右クリック →「終了」で終了します。インストール版は Windows の設定 →「アプリ」からアンインストールできます。ZIP版は自動起動をオフにしてから、展開したフォルダーを削除します。
 
-どちらも保存した設定は残ります。設定も不要なら `%LOCALAPPDATA%\ViperV3BatteryIndicator` を削除できます。
+どちらも保存した設定は残ります。設定も不要なら `%LOCALAPPDATA%\MouseBatteryIndicator` を削除できます。旧版を使っていた場合は、引き継ぎ元の設定フォルダーも残ります。
 
 ## 参照仕様
 

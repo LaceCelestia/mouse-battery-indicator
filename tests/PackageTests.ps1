@@ -25,7 +25,7 @@ if ([string]::IsNullOrWhiteSpace($HashPath)) {
 $HashPath = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $HashPath).ProviderPath)
 $packageName = [System.IO.Path]::GetFileName($PackagePath)
 $firstStepsRelativePath = 'docs/' + (-join [char[]]@(0x306F, 0x3058, 0x3081, 0x306B)) + '.txt'
-$expectedEntries = @('ViperV3BatteryIndicator.exe', 'README.md', $firstStepsRelativePath)
+$expectedEntries = @('MouseBatteryIndicator.exe', 'README.md', $firstStepsRelativePath)
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::OpenRead($PackagePath)
@@ -60,15 +60,28 @@ try {
         Assert-Package ((Test-Path -LiteralPath (Join-Path $extractionDirectory $expectedEntry) -PathType Leaf)) "The extracted file must exist: $expectedEntry"
     }
 
-    $extractedExecutable = Join-Path $extractionDirectory 'ViperV3BatteryIndicator.exe'
-    $extractedVersion = [System.Reflection.AssemblyName]::GetAssemblyName($extractedExecutable).Version
+    $extractedExecutable = Join-Path $extractionDirectory 'MouseBatteryIndicator.exe'
+    $extractedAssemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($extractedExecutable)
+    Assert-Package ($extractedAssemblyName.Name -ceq 'MouseBatteryIndicator') 'The assembly identity must be MouseBatteryIndicator; renaming a legacy executable is not sufficient.'
+    $extractedVersion = $extractedAssemblyName.Version
     $versionMatch = [regex]::Match($packageName, '^MouseBatteryIndicator-v(\d+\.\d+\.\d+(?:\.\d+)?)-windows\.zip$')
     Assert-Package $versionMatch.Success 'The ZIP name must identify the product, assembly version, and Windows platform.'
     $versionInName = [Version]$versionMatch.Groups[1].Value
     $normalizedRevision = [Math]::Max(0, $versionInName.Revision)
     Assert-Package ($extractedVersion.Major -eq $versionInName.Major -and $extractedVersion.Minor -eq $versionInName.Minor -and $extractedVersion.Build -eq $versionInName.Build -and $extractedVersion.Revision -eq $normalizedRevision) 'The executable assembly version must match the package file name.'
 
-    $buildExecutable = Join-Path $workDirectory 'ViperV3BatteryIndicator.exe'
+    $fileVersionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($extractedExecutable)
+    Assert-Package ($fileVersionInfo.OriginalFilename -ceq 'MouseBatteryIndicator.exe') 'The original executable filename in Windows file properties must use the generic product name.'
+    Assert-Package (-not [string]::IsNullOrWhiteSpace($fileVersionInfo.FileDescription) -and $fileVersionInfo.FileDescription -notmatch 'Viper') 'The Windows file description must exist and must not imply Viper-only support.'
+    Assert-Package (-not [string]::IsNullOrWhiteSpace($fileVersionInfo.ProductName) -and $fileVersionInfo.ProductName -notmatch 'Viper') 'The Windows product name must exist and must not imply Viper-only support.'
+
+    # Inspect metadata without executing the application or locking the extracted file.
+    $metadataAssembly = [System.Reflection.Assembly]::ReflectionOnlyLoad([System.IO.File]::ReadAllBytes($extractedExecutable))
+    foreach ($providerType in @('RazerBatteryReader', 'LogitechBatteryReader', 'XenicsBatteryReader', 'WindowsBatteryReader')) {
+        Assert-Package ($null -ne $metadataAssembly.GetType("ViperBattery.$providerType", $false, $false)) "The distribution must include the $providerType provider."
+    }
+
+    $buildExecutable = Join-Path $workDirectory 'MouseBatteryIndicator.exe'
     Assert-Package ((Get-FileHash -LiteralPath $extractedExecutable -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $buildExecutable -Algorithm SHA256).Hash) 'The packaged executable must equal the staged build.'
     foreach ($documentName in @('README.md', $firstStepsRelativePath)) {
         $sourceHash = (Get-FileHash -LiteralPath (Join-Path $projectDirectory $documentName) -Algorithm SHA256).Hash

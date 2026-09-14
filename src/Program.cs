@@ -36,7 +36,7 @@ namespace ViperBattery
                         + "Detected devices: " + scan.Readings.Count + Environment.NewLine + Environment.NewLine;
                     foreach (BatteryReading device in scan.Readings)
                         report += device.DeviceName + " | " + MouseBatteryService.LevelText(device) + " | " + device.Connection + Environment.NewLine;
-                    report += Environment.NewLine + reader.Diagnose();
+                    report += Environment.NewLine + reader.Diagnose() + Environment.NewLine + HidInventory.Diagnose();
                     File.WriteAllText(destination, report, new UTF8Encoding(true));
                     return reading.Connected && reading.Percentage.HasValue ? 0 : 2;
                 }
@@ -90,7 +90,7 @@ namespace ViperBattery
             {
                 lock (Sync)
                 {
-                    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ViperV3BatteryIndicator");
+                    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MouseBatteryIndicator");
                     Directory.CreateDirectory(folder);
                     string path = Path.Combine(folder, "app.log");
                     if (File.Exists(path) && new FileInfo(path).Length > 262144) File.Delete(path);

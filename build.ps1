@@ -42,7 +42,7 @@ if ($sourceFiles.Count -eq 0) {
 $manifestPath = Join-Path $projectDirectory 'app.manifest'
 
 if ($Test) {
-    foreach ($testName in @('ProtocolTests', 'LogitechProtocolTests', 'WindowsBatteryTests', 'ServiceTests', 'UiTests')) {
+    foreach ($testName in @('ProtocolTests', 'LogitechProtocolTests', 'XenicsProtocolTests', 'WindowsBatteryTests', 'HidInventoryTests', 'ServiceTests', 'UiTests')) {
         $testSource = Join-Path $projectDirectory "tests\$testName.cs"
         if (-not (Test-Path -LiteralPath $testSource)) {
             throw "Required test source is missing: $testSource"
@@ -60,8 +60,8 @@ if ($Test) {
     }
 }
 
-$stagedExecutable = Join-Path $workDirectory 'ViperV3BatteryIndicator.exe'
-$outputExecutable = Join-Path $outputDirectory 'ViperV3BatteryIndicator.exe'
+$stagedExecutable = Join-Path $workDirectory 'MouseBatteryIndicator.exe'
+$outputExecutable = Join-Path $outputDirectory 'MouseBatteryIndicator.exe'
 $buildArguments = $commonArguments + @('/target:winexe', "/out:$stagedExecutable", "/win32manifest:$manifestPath") + $sourceFiles
 & $compiler @buildArguments
 if ($LASTEXITCODE -ne 0) {
