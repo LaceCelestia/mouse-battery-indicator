@@ -4,9 +4,9 @@
 
 ## 使い方
 
-[最新版をダウンロード](https://github.com/LaceCelestia/mouse-battery-indicator/releases/latest)し、`MouseBatteryIndicator-v1.0.0-Setup.exe` を開いてインストールします。管理者権限は不要です。インストール後はスタートメニューの「Mouse Battery Indicator」から起動できます。スタートメニューや exe から起動すると詳細画面を開き、Windows 起動時の自動実行では通知領域にだけ表示します。
+[最新版をダウンロード](https://github.com/LaceCelestia/mouse-battery-indicator/releases/latest)し、`MouseBatteryIndicator-v1.1.0-Setup.exe` を開いてインストールします。管理者権限は不要です。インストール後はスタートメニューの「Mouse Battery Indicator」から起動できます。スタートメニューや exe から起動すると詳細画面を開き、Windows 起動時の自動実行では通知領域にだけ表示します。
 
-インストールせず使う場合は、同じページの `MouseBatteryIndicator-v1.0.0-windows.zip` を展開し、`MouseBatteryIndicator.exe` を開きます。GitHub の「Source code」は開発用ソースなので、通常は Setup.exe を選んでください。
+インストールせず使う場合は、同じページの `MouseBatteryIndicator-v1.1.0-windows.zip` を展開し、`MouseBatteryIndicator.exe` を開きます。GitHub の「Source code」は開発用ソースなので、通常は Setup.exe を選んでください。
 
 - 数字が隠れている場合は、通知領域の「∧」を開き、数字をタスクバーへドラッグします。
 - 左クリックで機種名・残量・充電状態と、残量の推移グラフ（24 時間／7 日間）を表示します。もう一度クリックすると閉じます。
