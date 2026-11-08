@@ -19,6 +19,7 @@ namespace ViperBattery
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         private readonly AppSettings settings = AppSettings.Load();
+        private readonly BatteryHistory history = BatteryHistory.Load(BatteryHistory.DefaultPath, DateTime.UtcNow);
         private readonly EventWaitHandle showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ShowEventName);
         private RegisteredWaitHandle showWait;
         private ContextMenuStrip menu;
@@ -36,10 +37,11 @@ namespace ViperBattery
         {
             IntPtr unused = dispatcher.Handle;
             popup = new BatteryPopup(Refresh, ShowMenu);
+            popup.History = history;
             tray.Text = "残量を確認中";
             UpdateIcon();
             tray.Visible = true;
-            tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) ShowPopup(); };
+            tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) TogglePopup(); };
             tray.BalloonTipClicked += delegate { ShowPopup(); };
             BuildMenu();
             timer.Interval = settings.PollSeconds * 1000;
@@ -59,7 +61,16 @@ namespace ViperBattery
             catch (InvalidOperationException) { }
         }
 
-        private void OnPreferencesChanged(object sender, UserPreferenceChangedEventArgs e) { Dispatch(UpdateIcon); }
+        private void OnPreferencesChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            Dispatch(delegate
+            {
+                // Light/dark mode and accent color changes arrive here; the menu reads the theme when it paints.
+                FluentTheme.Refresh();
+                UpdateIcon();
+                popup.ApplyTheme();
+            });
+        }
         private void OnPowerChanged(object sender, PowerModeChangedEventArgs e)
         {
             if (e.Mode == PowerModes.Resume) Dispatch(Refresh);
@@ -84,6 +95,8 @@ namespace ViperBattery
                 {
                     refreshing = false;
                     devices = task.Result.Readings ?? new List<BatteryReading>();
+                    DateTime now = DateTime.UtcNow;
+                    foreach (BatteryReading device in devices) history.Record(device, now);
                     ApplySelection();
                     timer.Stop();
                     timer.Start();
@@ -104,7 +117,10 @@ namespace ViperBattery
         {
             reading = MouseBatteryService.Select(devices, settings.PreferredDeviceId,
                 reading == null ? null : reading.DeviceId, settings.PreferredDeviceName, settings.PreferredDeviceContainerId);
-            if (!String.Equals(notificationDeviceId, reading.DeviceId, StringComparison.OrdinalIgnoreCase))
+            // A sleeping or briefly missing mouse becomes a placeholder without an ID; only a different
+            // connected mouse resets the low-battery notice, so waking the same mouse does not notify again.
+            if (reading.Connected && reading.DeviceId != null
+                && !String.Equals(notificationDeviceId, reading.DeviceId, StringComparison.OrdinalIgnoreCase))
             {
                 notificationDeviceId = reading.DeviceId;
                 lowBatteryNotified = false;
@@ -123,8 +139,14 @@ namespace ViperBattery
             if (previous != null) previous.Dispose();
             string state = MouseBatteryService.LevelText(reading) + (reading != null && reading.Connected && reading.IsCharging == true ? "（充電中）" : "");
             string device = reading != null && !String.IsNullOrWhiteSpace(reading.DeviceName) ? reading.DeviceName : "マウス";
-            string tooltip = device + " | " + state;
+            string tooltip = device + "\n" + state;
             tray.Text = tooltip.Length <= 63 ? tooltip : tooltip.Substring(0, 62) + "…";
+        }
+
+        private void TogglePopup()
+        {
+            if (popup.Visible) popup.Hide();
+            else if (!popup.JustAutoHidden) ShowPopup();
         }
 
         private void ShowPopup()
@@ -165,7 +187,7 @@ namespace ViperBattery
             menu.Items.Add(interval);
             ToolStripMenuItem color = new ToolStripMenuItem("数字の色");
             string[] values = { "auto", "green", "white", "black" };
-            string[] labels = { "自動（Windows のテーマに合わせる）", "ライムグリーン", "白", "黒" };
+            string[] labels = { "自動（Windows のテーマに合わせる）", "グリーン", "白", "黒" };
             for (int i = 0; i < values.Length; i++)
             {
                 string value = values[i];
@@ -219,6 +241,8 @@ namespace ViperBattery
                 startup.Checked = StartupRegistration.IsEnabled;
                 diagnostics.Enabled = !savingDiagnostics;
             };
+            FluentMenu.Apply(menu);
+            FluentMenu.Apply(deviceMenu.DropDown);
             tray.ContextMenuStrip = menu;
             if (previous != null) previous.Dispose();
         }

@@ -27,6 +27,7 @@ internal static class UiTests
             TestPopup(outputDirectory);
             TestIcons();
             TestChargingDigitConsistency();
+            SaveDesignPreviews(outputDirectory);
             SaveIconSheet(Path.Combine(outputDirectory, "icons.png"));
             Console.WriteLine("UI tests: " + assertions + " assertions passed. No hardware access.");
             return 0;
@@ -187,6 +188,114 @@ internal static class UiTests
                     if (charging.GetPixel(x, y).A > 0) markerTop = Math.Min(markerTop, y);
                 Assert(markerTop < charging.Height, "Charging must add a visible marker below the digits at " + size + "px.");
                 Assert(markerTop > digitBottom + 1, "A fully transparent row must separate the digits and charging marker at " + size + "px.");
+            }
+        }
+    }
+
+    private static BatteryHistory SampleHistory(DateTime nowUtc, out int current)
+    {
+        // A week of synthetic use: discharge during the day, PC off at night, and a recharge when low.
+        BatteryHistory history = new BatteryHistory(null);
+        BatteryReading reading = Sample(55, false);
+        reading.Provider = "Razer";
+        double level = 55;
+        bool charging = false;
+        for (DateTime t = nowUtc.AddDays(-7.5); t <= nowUtc; t = t.AddMinutes(10))
+        {
+            int hour = t.ToLocalTime().Hour;
+            if (hour >= 2 && hour < 8) continue;
+            if (charging) { level += 5; if (level >= 100) { level = 100; charging = false; } }
+            else { level -= 0.22; if (level <= 16) charging = true; }
+            reading.Percentage = (int)Math.Round(level);
+            reading.IsCharging = charging;
+            history.Record(reading, t);
+        }
+        current = (int)Math.Round(level);
+        return history;
+    }
+
+    private static void SaveDesignPreviews(string outputDirectory)
+    {
+        DateTime now = new DateTime(2026, 11, 8, 7, 20, 0, DateTimeKind.Utc);
+        int current;
+        BatteryHistory history = SampleHistory(now, out current);
+        try
+        {
+            foreach (bool light in new[] { false, true })
+            {
+                FluentTheme.Override(light, light ? Color.FromArgb(0, 95, 184) : Color.FromArgb(96, 205, 255));
+                string theme = light ? "light" : "dark";
+                using (BatteryPopup popup = new BatteryPopup(delegate { }, delegate { }))
+                {
+                    popup.History = history;
+                    popup.Clock = delegate { return now; };
+                    popup.Location = new Point(-32000, -32000);
+                    popup.Show();
+                    popup.ApplyTheme();
+                    BatteryReading live = Sample(current, false);
+                    live.Provider = "Razer";
+                    live.Timestamp = now.ToLocalTime();
+                    popup.UpdateReading(live, false, 60);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-day.png"));
+                    popup.PreviewHover(0.62);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-hover.png"));
+                    popup.ShowWeek(true);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-week.png"));
+                    Assert(popup.WeekRange, "The week view can be selected.");
+                    popup.ShowWeek(false);
+
+                    BatteryReading charging = Sample(17, true);
+                    charging.Provider = "Razer";
+                    charging.Timestamp = now.ToLocalTime();
+                    popup.UpdateReading(charging, false, 60);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-charging.png"));
+
+                    BatteryReading low = Sample(12, false);
+                    low.DeviceName = "MX Master 3S";
+                    low.Provider = "Logitech";
+                    low.Connection = "USB レシーバー";
+                    low.Timestamp = now.ToLocalTime();
+                    popup.UpdateReading(low, false, 60);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-low-empty.png"));
+
+                    popup.UpdateReading(MouseBatteryService.Unavailable("test", "Razer Viper V3 Pro", "offline"), false, 60);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-offline.png"));
+                    popup.Hide();
+                }
+                SaveMenuPreview(Path.Combine(outputDirectory, "design-" + theme + "-menu.png"));
+            }
+        }
+        finally { FluentTheme.Override(null, null); }
+    }
+
+    private static void SaveMenuPreview(string path)
+    {
+        using (ContextMenuStrip menu = new ContextMenuStrip())
+        {
+            menu.Font = new Font("Yu Gothic UI", 9F);
+            menu.Items.Add("詳細を表示");
+            menu.Items.Add("今すぐ更新");
+            ToolStripMenuItem devices = new ToolStripMenuItem("表示するマウス");
+            devices.DropDownItems.Add(new ToolStripMenuItem("自動") { Checked = true });
+            menu.Items.Add(devices);
+            menu.Items.Add(new ToolStripSeparator());
+            ToolStripMenuItem interval = new ToolStripMenuItem("更新間隔");
+            interval.DropDownItems.Add(new ToolStripMenuItem("60 秒") { Checked = true });
+            menu.Items.Add(interval);
+            menu.Items.Add(new ToolStripMenuItem("残量 20% 以下で通知") { Checked = true });
+            menu.Items.Add(new ToolStripMenuItem("Windows 起動時に実行"));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(new ToolStripMenuItem("診断結果を保存") { Enabled = false });
+            menu.Items.Add("終了");
+            FluentMenu.Apply(menu);
+            IntPtr unused = menu.Handle;
+            menu.Size = menu.GetPreferredSize(Size.Empty);
+            menu.PerformLayout();
+            Assert(menu.Items[1].Height >= 24, "Menu rows have touch-friendly height (" + menu.Items[1].Height + ").");
+            using (Bitmap bitmap = new Bitmap(menu.Width, menu.Height))
+            {
+                menu.DrawToBitmap(bitmap, new Rectangle(Point.Empty, menu.Size));
+                bitmap.Save(path, ImageFormat.Png);
             }
         }
     }

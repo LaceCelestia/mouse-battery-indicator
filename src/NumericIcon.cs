@@ -5,7 +5,6 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace ViperBattery
 {
@@ -28,8 +27,9 @@ namespace ViperBattery
             float digitHeight = size - Math.Max(3F, (float)Math.Round(size * 0.15F))
                 - Math.Max(1F, (float)Math.Round(size * 0.05F)) - 1F;
             Color color = Foreground(preference, useLightTheme);
-            if (!percent.HasValue) color = Color.FromArgb(150, 157, 166);
-            else if (percent <= 20 && !charging) color = Color.FromArgb(255, 144, 98);
+            if (!percent.HasValue) color = useLightTheme ? Color.FromArgb(118, 118, 118) : Color.FromArgb(150, 150, 150);
+            // Orange tuned per taskbar so the low-battery state keeps its contrast on light taskbars too.
+            else if (percent <= 20 && !charging) color = useLightTheme ? Color.FromArgb(192, 79, 0) : Color.FromArgb(255, 159, 87);
             using (Bitmap bitmap = new Bitmap(size, size, PixelFormat.Format32bppArgb))
             using (Graphics graphics = Graphics.FromImage(bitmap))
             {
@@ -37,13 +37,13 @@ namespace ViperBattery
                 graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 string label = percent.HasValue ? percent.Value.ToString() : "--";
-                string family = weight == "normal" ? "Segoe UI Semibold" : "Segoe UI";
-                FontStyle style = weight == "bold" ? FontStyle.Bold : FontStyle.Regular;
-                using (Font font = new Font(family, 15, style, GraphicsUnit.Pixel))
+                FontStyle style;
+                string family = DigitFamily(weight, out style);
+                using (FontFamily font = new FontFamily(family))
                 using (GraphicsPath path = new GraphicsPath())
                 using (Brush brush = new SolidBrush(color))
                 {
-                    path.AddString(label, font.FontFamily, (int)style, 15F, Point.Empty, StringFormat.GenericTypographic);
+                    path.AddString(label, font, (int)style, 15F, Point.Empty, StringFormat.GenericTypographic);
                     RectangleF bounds = path.GetBounds();
                     float availableWidth = size - 1F;
                     float availableHeight = digitHeight;
@@ -69,7 +69,7 @@ namespace ViperBattery
                     int left = (size - width) / 2;
                     int height = (int)markerHeight;
                     int top = size - height;
-                    Color markerColor = useLightTheme ? Color.FromArgb(15, 132, 67) : Color.FromArgb(101, 224, 149);
+                    Color markerColor = useLightTheme ? Color.FromArgb(16, 124, 16) : Color.FromArgb(108, 203, 95);
                     using (Brush brush = new SolidBrush(markerColor))
                     {
                         graphics.SmoothingMode = SmoothingMode.None;
@@ -82,23 +82,32 @@ namespace ViperBattery
             }
         }
 
+        // Bahnschrift SemiCondensed (Windows 10 1709+) keeps "100" legible at 16px without distorting the digits.
+        internal static string DigitFamily(string weight, out FontStyle style)
+        {
+            style = FontStyle.Regular;
+            if (FluentFonts.Has("Bahnschrift SemiCondensed"))
+            {
+                if (weight == "bold") { style = FontStyle.Bold; return "Bahnschrift SemiCondensed"; }
+                if (weight == "light") return "Bahnschrift SemiCondensed";
+                if (FluentFonts.Has("Bahnschrift SemiBold SemiConden")) return "Bahnschrift SemiBold SemiConden";
+                return "Bahnschrift SemiCondensed";
+            }
+            if (weight == "bold") style = FontStyle.Bold;
+            return weight == "normal" ? FluentFonts.First("Segoe UI Semibold", "Segoe UI") : FluentFonts.First("Segoe UI", "Arial");
+        }
+
         private static Color Foreground(string preference, bool lightTaskbar)
         {
-            if (preference == "green") return Color.FromArgb(176, 242, 98);
+            if (preference == "green") return lightTaskbar ? Color.FromArgb(16, 137, 62) : Color.FromArgb(76, 227, 138);
             if (preference == "white") return Color.White;
-            if (preference == "black") return Color.FromArgb(24, 28, 32);
-            return lightTaskbar ? Color.FromArgb(24, 28, 32) : Color.White;
+            if (preference == "black") return Color.FromArgb(27, 27, 27);
+            return lightTaskbar ? Color.FromArgb(27, 27, 27) : Color.White;
         }
 
         private static bool IsLightTaskbar()
         {
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
-                    return key != null && Convert.ToInt32(key.GetValue("SystemUsesLightTheme", 0)) == 1;
-            }
-            catch { }
-            return false;
+            return FluentTheme.IsSystemLight();
         }
     }
 }

@@ -42,7 +42,7 @@ if ($sourceFiles.Count -eq 0) {
 $manifestPath = Join-Path $projectDirectory 'app.manifest'
 
 if ($Test) {
-    foreach ($testName in @('ProtocolTests', 'LogitechProtocolTests', 'XenicsProtocolTests', 'WindowsBatteryTests', 'HidInventoryTests', 'ServiceTests', 'UiTests')) {
+    foreach ($testName in @('ProtocolTests', 'LogitechProtocolTests', 'XenicsProtocolTests', 'WindowsBatteryTests', 'HidInventoryTests', 'ServiceTests', 'HistoryTests', 'UiTests')) {
         $testSource = Join-Path $projectDirectory "tests\$testName.cs"
         if (-not (Test-Path -LiteralPath $testSource)) {
             throw "Required test source is missing: $testSource"

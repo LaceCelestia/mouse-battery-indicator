@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
@@ -11,6 +12,9 @@ namespace ViperBattery
         internal const string AppName = "Mouse Battery Indicator";
         private const string InstanceName = @"Local\ViperV3BatteryIndicator.Instance";
         internal const string ShowEventName = @"Local\ViperV3BatteryIndicator.Show";
+
+        [DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(int processId);
 
         [STAThread]
         private static int Main(string[] args)
@@ -52,11 +56,16 @@ namespace ViperBattery
                     return 0;
                 }
 
+                // Sign-in and the installer start quietly; opening the app from the Start menu shows the details.
+                bool background = Array.IndexOf(args, "--background") >= 0;
                 bool isFirst;
                 using (Mutex instance = new Mutex(true, InstanceName, out isFirst))
                 {
                     if (!isFirst)
                     {
+                        if (background) return 0;
+                        // This launch owns the foreground right; pass it on so the running instance can activate its popup.
+                        AllowSetForegroundWindow(-1);
                         try { using (EventWaitHandle signal = EventWaitHandle.OpenExisting(ShowEventName)) signal.Set(); }
                         catch (WaitHandleCannotBeOpenedException) { }
                         return 0;
@@ -64,7 +73,7 @@ namespace ViperBattery
                     try
                     {
                         Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e) { AppLog.Write(e.Exception); };
-                        using (TrayApplication app = new TrayApplication(Array.IndexOf(args, "--show") >= 0))
+                        using (TrayApplication app = new TrayApplication(!background))
                             Application.Run(app);
                     }
                     finally { instance.ReleaseMutex(); }
