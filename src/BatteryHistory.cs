@@ -29,6 +29,8 @@ namespace ViperBattery
         private readonly string path;
         private DateTime lastCompactUtc;
         private bool reportedWriteFailure;
+        // When the log could not be read at startup, never rewrite it: that would drop the unread lines.
+        private bool appendOnly;
 
         internal Action<Exception> ReportError = AppLog.Write;
 
@@ -53,15 +55,21 @@ namespace ViperBattery
             return Clean(reading.Provider) + "|" + Clean(reading.DeviceName);
         }
 
-        // A disconnected mouse is reported without its provider; match its log by product name.
+        // A disconnected mouse is reported without its provider; use the most recent log with its product name.
         internal string ResolveKey(BatteryReading reading)
         {
             string key = KeyFor(reading);
             if (key == null || reading.Connected || series.ContainsKey(key)) return key;
             string suffix = "|" + Clean(reading.DeviceName);
-            foreach (string candidate in series.Keys)
-                if (candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) return candidate;
-            return key;
+            string best = null;
+            DateTime newest = DateTime.MinValue;
+            foreach (KeyValuePair<string, List<BatterySample>> pair in series)
+            {
+                if (!pair.Key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) || pair.Value.Count == 0) continue;
+                DateTime last = pair.Value[pair.Value.Count - 1].Utc;
+                if (best == null || last > newest) { best = pair.Key; newest = last; }
+            }
+            return best ?? key;
         }
 
         private static string Clean(string value)
@@ -69,9 +77,10 @@ namespace ViperBattery
             return (value ?? "").Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ').Trim();
         }
 
-        internal static BatteryHistory Load(string path, DateTime nowUtc)
+        internal static BatteryHistory Load(string path, DateTime nowUtc, Action<Exception> reportError = null)
         {
             BatteryHistory history = new BatteryHistory(path);
+            if (reportError != null) history.ReportError = reportError;
             history.lastCompactUtc = nowUtc;
             if (String.IsNullOrEmpty(path)) return history;
             bool dirty = false;
@@ -79,13 +88,15 @@ namespace ViperBattery
             {
                 FileInfo file = new FileInfo(path);
                 if (!file.Exists) return history;
+                IEnumerable<string> lines;
                 if (file.Length > MaxFileBytes)
                 {
-                    // An oversized log is not worth parsing at startup; start a fresh one.
-                    history.Rewrite();
-                    return history;
+                    // Keep the newest part of an oversized log instead of discarding all of it.
+                    lines = ReadTail(path, MaxFileBytes * 3 / 4);
+                    dirty = true;
                 }
-                foreach (string line in File.ReadLines(path, Encoding.UTF8))
+                else lines = File.ReadLines(path, Encoding.UTF8);
+                foreach (string line in lines)
                 {
                     string key;
                     BatterySample sample = Parse(line, out key);
@@ -95,11 +106,43 @@ namespace ViperBattery
             }
             catch (Exception error)
             {
-                AppLog.Write(error);
+                history.appendOnly = true;
+                history.ReportError(error);
                 return history;
             }
             if (dirty) history.Rewrite();
             return history;
+        }
+
+        private static List<string> ReadTail(string path, long bytes)
+        {
+            List<string> lines = new List<string>();
+            using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                stream.Seek(-bytes, SeekOrigin.End);
+                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                {
+                    reader.ReadLine(); // The first line is usually cut in the middle.
+                    string line;
+                    while ((line = reader.ReadLine()) != null) lines.Add(line);
+                }
+            }
+            return lines;
+        }
+
+        // Records every mouse from one scan; two mice with the same product name keep the first reading only.
+        internal int RecordScan(IEnumerable<BatteryReading> readings, DateTime nowUtc)
+        {
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int recorded = 0;
+            if (readings == null) return 0;
+            foreach (BatteryReading reading in readings)
+            {
+                string key = KeyFor(reading);
+                if (key == null || reading == null || !reading.Connected || !reading.Percentage.HasValue || !seen.Add(key)) continue;
+                if (Record(reading, nowUtc)) recorded++;
+            }
+            return recorded;
         }
 
         internal static BatterySample Parse(string line, out string key)
@@ -130,6 +173,7 @@ namespace ViperBattery
         }
 
         // Records changes immediately and unchanged levels at most every Heartbeat.
+        // Voltage estimates jitter by 1%, so for those a 1% move also waits for the heartbeat.
         internal bool Record(BatteryReading reading, DateTime nowUtc)
         {
             if (reading == null || !reading.Connected || !reading.Percentage.HasValue) return false;
@@ -141,13 +185,16 @@ namespace ViperBattery
             List<BatterySample> samples;
             if (series.TryGetValue(key, out samples) && samples.Count > 0)
             {
-                BatterySample last = samples[samples.Count - 1];
-                TimeSpan elapsed = sample.Utc - last.Utc;
-                if (last.Percent == percent && last.Charging == sample.Charging && elapsed >= TimeSpan.Zero && elapsed < Heartbeat)
+                // Compare with the sample just before this time: the last one, unless the clock moved back.
+                BatterySample previous = null;
+                for (int i = samples.Count - 1; i >= 0; i--)
+                    if (samples[i].Utc <= sample.Utc) { previous = samples[i]; break; }
+                if (previous != null && sample.Utc - previous.Utc < Heartbeat && previous.Charging == sample.Charging
+                    && (previous.Percent == percent || (reading.IsApproximate && Math.Abs(previous.Percent - percent) <= 1)))
                     return false;
             }
             Insert(key, sample);
-            if (nowUtc - lastCompactUtc > TimeSpan.FromDays(1))
+            if (!appendOnly && nowUtc - lastCompactUtc > TimeSpan.FromDays(1))
             {
                 lastCompactUtc = nowUtc;
                 Prune(nowUtc);

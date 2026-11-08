@@ -43,6 +43,7 @@ namespace ViperBattery
         internal Color TooltipStroke;
 
         private static FluentTheme current;
+        private static string preference = "auto";
         private static bool? lightOverride;
         private static Color? accentOverride;
 
@@ -50,13 +51,26 @@ namespace ViperBattery
         {
             get
             {
-                if (current == null) current = Create(lightOverride ?? IsSystemLight(), accentOverride);
+                if (current == null)
+                {
+                    bool light = lightOverride.HasValue ? lightOverride.Value : (preference == "light" || (preference != "dark" && IsSystemLight()));
+                    current = lightOverride == null && SystemInformation.HighContrast ? CreateHighContrast() : Create(light, accentOverride);
+                }
                 return current;
             }
         }
 
         // Re-read the Windows mode and accent color on the next access.
         internal static void Refresh() { current = null; }
+
+        // The user's choice from the menu: "auto" follows Windows, "light" and "dark" fix the mode.
+        internal static void SetPreference(string value)
+        {
+            preference = value == "light" || value == "dark" ? value : "auto";
+            current = null;
+        }
+
+        internal static string Preference { get { return preference; } }
 
         // Tests render both modes deterministically, independently of this PC's settings.
         internal static void Override(bool? light, Color? accent)
@@ -91,7 +105,7 @@ namespace ViperBattery
                 t.CardStroke = Color.FromArgb(232, 232, 232);
                 t.TextPrimary = Color.FromArgb(27, 27, 27);
                 t.TextSecondary = Color.FromArgb(96, 96, 96);
-                t.TextTertiary = Color.FromArgb(128, 128, 128);
+                t.TextTertiary = Color.FromArgb(112, 112, 112);
                 t.TextDisabled = Color.FromArgb(160, 160, 160);
                 t.SubtleHover = Color.FromArgb(237, 237, 237);
                 t.SubtlePressed = Color.FromArgb(242, 242, 242);
@@ -140,6 +154,38 @@ namespace ViperBattery
             t.AccentPressed = Blend(t.Accent, t.Footer, 0.8F);
             t.TextOnAccent = Contrast(t.Accent, Color.White) >= Contrast(t.Accent, Color.Black) ? Color.White : Color.Black;
             return t;
+        }
+
+        // High contrast: every role maps to a system color so the user's contrast theme is honored.
+        private static FluentTheme CreateHighContrast()
+        {
+            FluentTheme t = new FluentTheme();
+            Color window = SystemColors.Window, text = SystemColors.WindowText;
+            t.IsLight = Luminance(window) > 0.5;
+            t.Background = t.Footer = t.Card = t.ControlFill = t.SegmentSelected = t.Tooltip = window;
+            t.Divider = t.WindowStroke = t.CardStroke = t.ControlStroke = t.AxisLine = t.TooltipStroke = text;
+            t.TextPrimary = t.TextSecondary = t.TextTertiary = text;
+            t.TextDisabled = t.GridLine = SystemColors.GrayText;
+            t.Accent = t.AccentHover = t.AccentPressed = SystemColors.Highlight;
+            t.TextOnAccent = SystemColors.HighlightText;
+            t.AccentDisabled = SystemColors.GrayText;
+            t.TextOnAccentDisabled = window;
+            t.SubtleHover = t.SubtlePressed = window;
+            t.Battery = t.Low = t.Charging = SystemColors.Highlight;
+            return t;
+        }
+
+        // Hover and pressed fills relative to the surface below, like Windows 11 subtle fills.
+        internal Color HoverOn(Color surface)
+        {
+            if (SystemInformation.HighContrast && surface == SystemColors.Window) return SystemColors.Highlight;
+            return IsLight ? Blend(Color.Black, surface, 0.06F) : Blend(Color.White, surface, 0.08F);
+        }
+
+        internal Color PressedOn(Color surface)
+        {
+            if (SystemInformation.HighContrast && surface == SystemColors.Window) return SystemColors.Highlight;
+            return IsLight ? Blend(Color.Black, surface, 0.035F) : Blend(Color.White, surface, 0.05F);
         }
 
         // Windows 11 uses a darker accent step on light surfaces and a lighter one on dark surfaces.
@@ -407,14 +453,14 @@ namespace ViperBattery
                     break;
                 case FlyoutButtonKind.Segment:
                     if (selected) fill = theme.SegmentSelected;
-                    else if (pressed) fill = theme.SubtlePressed;
-                    else if (hover) fill = theme.SubtleHover;
+                    else if (pressed) fill = theme.PressedOn(Surface);
+                    else if (hover) fill = theme.HoverOn(Surface);
                     ink = selected ? theme.TextPrimary : theme.TextSecondary;
                     radius = 3F * UiScale;
                     break;
                 default:
-                    if (pressed) fill = theme.SubtlePressed;
-                    else if (hover) fill = theme.SubtleHover;
+                    if (pressed) fill = theme.PressedOn(Surface);
+                    else if (hover) fill = theme.HoverOn(Surface);
                     ink = Enabled ? theme.TextPrimary : theme.TextDisabled;
                     break;
             }

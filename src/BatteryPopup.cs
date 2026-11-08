@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ViperBattery
@@ -30,6 +31,7 @@ namespace ViperBattery
         private readonly FlyoutButton weekButton;
         private readonly float scale = 1F;
         private Font nameFont;
+        private Font nameCjkFont;
         private Font textFont;
         private Font smallFont;
         private Font titleFont;
@@ -114,6 +116,7 @@ namespace ViperBattery
         private void CreateFonts()
         {
             nameFont = new Font(FluentFonts.Title, 15F * scale, FontStyle.Regular, GraphicsUnit.Pixel);
+            nameCjkFont = new Font(FluentFonts.TextSemibold, 15F * scale, FontStyle.Regular, GraphicsUnit.Pixel);
             textFont = new Font(FluentFonts.Text, 12F * scale, FontStyle.Regular, GraphicsUnit.Pixel);
             smallFont = new Font(FluentFonts.Text, 11F * scale, FontStyle.Regular, GraphicsUnit.Pixel);
             titleFont = new Font(FluentFonts.TextSemibold, 13F * scale, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -208,15 +211,49 @@ namespace ViperBattery
             ApplyTheme();
             Screen screen = Screen.FromPoint(Cursor.Position);
             Rectangle area = screen.WorkingArea;
-            Rectangle bounds = screen.Bounds;
             int margin = S(12);
-            // Open next to the taskbar wherever it is docked.
-            int x = area.Left > bounds.Left ? area.Left + margin : area.Right - Width - margin;
-            int y = area.Top > bounds.Top ? area.Top + margin : area.Bottom - Height - margin;
+            // Open next to the taskbar wherever it is docked (other app bars do not count).
+            int edge = TaskbarEdge(screen);
+            int x = edge == 0 ? area.Left + margin : area.Right - Width - margin;
+            int y = edge == 1 ? area.Top + margin : area.Bottom - Height - margin;
             Location = new Point(Math.Max(area.Left, x), Math.Max(area.Top, y));
             hoverX = null;
             Show();
             Activate();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect { public int Left, Top, Right, Bottom; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AppBarData
+        {
+            public int Size;
+            public IntPtr Window;
+            public uint CallbackMessage;
+            public uint Edge;
+            public NativeRect Bounds;
+            public IntPtr Param;
+        }
+
+        [DllImport("shell32.dll")]
+        private static extern IntPtr SHAppBarMessage(uint message, ref AppBarData data);
+
+        // 0 = left, 1 = top, 2 = right, 3 = bottom.
+        private static int TaskbarEdge(Screen screen)
+        {
+            try
+            {
+                AppBarData data = new AppBarData();
+                data.Size = Marshal.SizeOf(typeof(AppBarData));
+                if (SHAppBarMessage(5 /* ABM_GETTASKBARPOS */, ref data) != IntPtr.Zero)
+                {
+                    Rectangle bar = Rectangle.FromLTRB(data.Bounds.Left, data.Bounds.Top, data.Bounds.Right, data.Bounds.Bottom);
+                    if (data.Edge <= 3 && screen.Bounds.IntersectsWith(bar)) return (int)data.Edge;
+                }
+            }
+            catch { }
+            return 3;
         }
 
         internal void SavePreview(string path)
@@ -288,11 +325,14 @@ namespace ViperBattery
         private bool Valid { get { return Connected && reading.Percentage.HasValue; } }
         private bool Charging { get { return Connected && reading.IsCharging == true; } }
         private bool Low { get { return Valid && reading.Percentage.Value <= 20 && !Charging; } }
+        private bool Coarse { get { return Connected && !reading.Percentage.HasValue && !String.IsNullOrEmpty(reading.BatteryLevelText); } }
 
         private void DrawHeader(Graphics g, FluentTheme theme)
         {
             string device = reading != null && !String.IsNullOrWhiteSpace(reading.DeviceName) ? reading.DeviceName : "マウス";
-            FluentDraw.Text(g, device, nameFont, theme.TextPrimary, R(Pad, 14, LogicalWidth - Pad * 2, 26), TextFormatFlags.VerticalCenter);
+            // Segoe UI links Japanese to Meiryo UI Regular; names with Japanese use the Japanese semibold face.
+            Font font = device.Any(c => c >= '\u3000') ? nameCjkFont : nameFont;
+            FluentDraw.Text(g, device, font, theme.TextPrimary, R(Pad, 14, LogicalWidth - Pad * 2, 26), TextFormatFlags.VerticalCenter);
 
             Rectangle line = R(Pad, 42, LogicalWidth - Pad * 2, 20);
             int x = line.Left;
@@ -389,7 +429,7 @@ namespace ViperBattery
         private void DrawBattery(Graphics g, FluentTheme theme, RectangleF body)
         {
             float stroke = Math.Max(1F, 1.5F * scale);
-            Color outline = Valid ? theme.TextSecondary : theme.TextDisabled;
+            Color outline = Valid || Coarse ? theme.TextSecondary : theme.TextDisabled;
             FluentDraw.StrokeRounded(g, outline, stroke, body, S(6));
             FluentDraw.FillRounded(g, outline, new RectangleF(body.Right + S(2), body.Top + body.Height / 2 - S(5), S(3), S(10)), S(1.5F));
             if (Valid && reading.Percentage.Value > 0)
@@ -467,24 +507,30 @@ namespace ViperBattery
             {
                 GraphicsState state = g.Save();
                 Rectangle clip = plot;
-                clip.Inflate(S(7), S(7));
+                clip.Inflate(S(12), S(12));
                 g.SetClip(clip);
                 anyCharging = DrawChargingBands(g, theme, plot, samples, from);
                 DrawSeries(g, theme, plot, samples, from);
                 BatterySample last = samples[samples.Count - 1];
-                if (now - last.Utc <= BatteryHistory.GapLimit)
+                // The glowing "now" dot marks a live reading; a disconnected mouse has none.
+                if (Valid && now - last.Utc <= BatteryHistory.GapLimit)
                     DrawDot(g, theme, new PointF(X(plot, from, last.Utc), Y(plot, last.Percent)), true);
                 g.Restore(state);
             }
             if (anyCharging) DrawChargingKey(g, theme);
-            if (samples.Count < 2)
+            // A line needs at least a few minutes of data; the first scan alone is only a dot.
+            bool sparse = samples.Count < 2 || samples[samples.Count - 1].Utc - samples[0].Utc < TimeSpan.FromMinutes(5);
+            if (sparse)
             {
-                // Mask the gridlines behind the message so the two lines stay readable.
-                FluentDraw.FillRounded(g, theme.Card, new RectangleF(plot.Left + S(8), plot.Top + S(12), plot.Width - S(16), S(44)), S(4));
+                string title = "まだ記録がありません", detail = "使い続けると、ここに残量の推移が表示されます";
+                if (reading == null) { title = "確認中…"; detail = null; }
+                else if (Coarse) { title = "推移を表示できません"; detail = "このマウスは残量を段階でのみ返します"; }
+                // Mask the gridlines behind the message so the text stays readable.
+                FluentDraw.FillRounded(g, theme.Card, new RectangleF(plot.Left - S(2), plot.Top + S(12), plot.Width + S(4), S(44)), S(4));
                 Rectangle message = new Rectangle(plot.Left, plot.Top + S(14), plot.Width, S(20));
-                FluentDraw.Text(g, "まだ記録がありません", textFont, theme.TextSecondary, message, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                FluentDraw.Text(g, title, textFont, theme.TextSecondary, message, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
                 message.Offset(0, S(20));
-                FluentDraw.Text(g, "使い続けると、ここに残量の推移が表示されます", smallFont, theme.TextTertiary, message, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                FluentDraw.Text(g, detail, smallFont, theme.TextTertiary, message, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
             else if (hoverX.HasValue) DrawHover(g, theme, plot, samples, from);
         }
@@ -502,19 +548,27 @@ namespace ViperBattery
         private bool DrawChargingBands(Graphics g, FluentTheme theme, Rectangle plot, IList<BatterySample> samples, DateTime from)
         {
             bool any = false;
-            using (Brush band = new SolidBrush(FluentTheme.WithAlpha(theme.TextPrimary, theme.IsLight ? 14 : 16)))
+            DateTime? start = null;
+            using (Brush band = new SolidBrush(FluentTheme.WithAlpha(theme.TextPrimary, ChargingBandAlpha(theme))))
             {
                 for (int i = 0; i < samples.Count; i++)
                 {
                     if (samples[i].Charging != true) continue;
                     any = true;
-                    DateTime end = i + 1 < samples.Count && samples[i + 1].Utc - samples[i].Utc <= BatteryHistory.GapLimit ? samples[i + 1].Utc : samples[i].Utc;
-                    float left = X(plot, from, samples[i].Utc), right = Math.Max(left + S(2), X(plot, from, end));
+                    bool connected = i + 1 < samples.Count && samples[i + 1].Utc - samples[i].Utc <= BatteryHistory.GapLimit;
+                    if (!start.HasValue) start = samples[i].Utc;
+                    if (connected && samples[i + 1].Charging == true) continue;
+                    // One rectangle per charging period, so overlapping edges do not darken the band.
+                    DateTime end = connected ? samples[i + 1].Utc : samples[i].Utc;
+                    float left = X(plot, from, start.Value), right = Math.Max(left + S(2), X(plot, from, end));
                     g.FillRectangle(band, left, plot.Top, right - left, plot.Height);
+                    start = null;
                 }
             }
             return any;
         }
+
+        private static int ChargingBandAlpha(FluentTheme theme) { return theme.IsLight ? 22 : 26; }
 
         private void DrawSeries(Graphics g, FluentTheme theme, Rectangle plot, IList<BatterySample> samples, DateTime from)
         {
@@ -527,7 +581,10 @@ namespace ViperBattery
                     run = new List<PointF>();
                     runs.Add(run);
                 }
-                run.Add(new PointF(X(plot, from, samples[i].Utc), Y(plot, samples[i].Percent)));
+                PointF point = new PointF(X(plot, from, samples[i].Utc), Y(plot, samples[i].Percent));
+                // A week holds thousands of samples; keep about two points per pixel column.
+                if (run.Count >= 2 && i < samples.Count - 1 && point.X - run[run.Count - 2].X < 1F) run[run.Count - 1] = point;
+                else run.Add(point);
             }
             Color line = theme.Battery;
             foreach (List<PointF> points in runs)
@@ -572,7 +629,7 @@ namespace ViperBattery
             Size title = TextRenderer.MeasureText(g, "バッテリー推移", titleFont, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
             int x = S(28) + title.Width + S(10);
             Rectangle swatch = new Rectangle(x, S(162) - S(5), S(10), S(10));
-            FluentDraw.FillRounded(g, FluentTheme.Blend(theme.TextPrimary, theme.Card, theme.IsLight ? 0.1F : 0.14F), swatch, S(2));
+            FluentDraw.FillRounded(g, FluentTheme.Blend(theme.TextPrimary, theme.Card, ChargingBandAlpha(theme) / 255F), swatch, S(2));
             FluentDraw.StrokeRounded(g, theme.AxisLine, 1F, new RectangleF(swatch.X + 0.5F, swatch.Y + 0.5F, swatch.Width - 1, swatch.Height - 1), S(2));
             FluentDraw.Text(g, "充電中", smallFont, theme.TextTertiary, new Rectangle(swatch.Right + S(4), S(152), S(60), S(20)), TextFormatFlags.VerticalCenter);
         }
@@ -661,7 +718,8 @@ namespace ViperBattery
             int width = size.Width + S(16), height = size.Height + S(8);
             int left = Math.Max(card.Left + S(6), Math.Min(card.Right - S(6) - width, (int)nearestX - width / 2));
             int top = (int)point.Y - S(12) - height;
-            if (top < card.Top + S(4)) top = (int)point.Y + S(12);
+            // Above a high point the tooltip would slide under the 24時間/7日間 buttons; show it below instead.
+            if (top < R(SegmentBounds).Bottom + S(4)) top = (int)point.Y + S(12);
             RectangleF box = new RectangleF(left, top, width, height);
             FluentDraw.FillRounded(g, theme.Tooltip, box, S(4));
             FluentDraw.StrokeRounded(g, theme.TooltipStroke, 1F, new RectangleF(left + 0.5F, top + 0.5F, width - 1, height - 1), S(4));
@@ -675,7 +733,7 @@ namespace ViperBattery
             if (disposing)
             {
                 // Child buttons share these fonts, so release them after the controls are gone.
-                foreach (IDisposable item in new IDisposable[] { nameFont, textFont, smallFont, titleFont, heroTextFont, statusGlyphFont, displayFamily, controlFont })
+                foreach (IDisposable item in new IDisposable[] { nameFont, nameCjkFont, textFont, smallFont, titleFont, heroTextFont, statusGlyphFont, displayFamily, controlFont })
                     if (item != null) item.Dispose();
             }
         }

@@ -31,16 +31,20 @@ namespace ViperBattery
         private bool refreshing;
         private bool savingDiagnostics;
         private bool lowBatteryNotified;
+        private bool popupOpenAtPress;
         private volatile bool stopping;
 
         internal TrayApplication(bool show)
         {
             IntPtr unused = dispatcher.Handle;
+            FluentTheme.SetPreference(settings.Theme);
             popup = new BatteryPopup(Refresh, ShowMenu);
             popup.History = history;
             tray.Text = "残量を確認中";
             UpdateIcon();
             tray.Visible = true;
+            // Decide at press time: pressing on the taskbar already deactivates and hides the popup.
+            tray.MouseDown += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) popupOpenAtPress = popup.Visible || popup.JustAutoHidden; };
             tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) TogglePopup(); };
             tray.BalloonTipClicked += delegate { ShowPopup(); };
             BuildMenu();
@@ -96,7 +100,7 @@ namespace ViperBattery
                     refreshing = false;
                     devices = task.Result.Readings ?? new List<BatteryReading>();
                     DateTime now = DateTime.UtcNow;
-                    foreach (BatteryReading device in devices) history.Record(device, now);
+                    history.RecordScan(devices, now);
                     ApplySelection();
                     timer.Stop();
                     timer.Start();
@@ -145,8 +149,10 @@ namespace ViperBattery
 
         private void TogglePopup()
         {
+            bool wasOpen = popupOpenAtPress || popup.Visible;
+            popupOpenAtPress = false;
             if (popup.Visible) popup.Hide();
-            else if (!popup.JustAutoHidden) ShowPopup();
+            else if (!wasOpen) ShowPopup();
         }
 
         private void ShowPopup()
@@ -207,6 +213,23 @@ namespace ViperBattery
                 weight.DropDownItems.Add(item);
             }
             menu.Items.Add(weight);
+            ToolStripMenuItem themeMenu = new ToolStripMenuItem("テーマ");
+            string[] themeValues = { "auto", "light", "dark" };
+            string[] themeLabels = { "自動（Windows に合わせる）", "ライト", "ダーク" };
+            for (int i = 0; i < themeValues.Length; i++)
+            {
+                string value = themeValues[i];
+                ToolStripMenuItem item = new ToolStripMenuItem(themeLabels[i]) { Checked = settings.Theme == value };
+                item.Click += delegate
+                {
+                    settings.Theme = value;
+                    SaveSettings();
+                    FluentTheme.SetPreference(value);
+                    popup.ApplyTheme();
+                };
+                themeMenu.DropDownItems.Add(item);
+            }
+            menu.Items.Add(themeMenu);
             ToolStripMenuItem notifications = new ToolStripMenuItem("残量 20% 以下で通知") { Checked = settings.LowBatteryNotification };
             notifications.Click += delegate { settings.LowBatteryNotification = !settings.LowBatteryNotification; SaveSettings(); };
             menu.Items.Add(notifications);
@@ -237,6 +260,7 @@ namespace ViperBattery
                 foreach (ToolStripMenuItem item in interval.DropDownItems) item.Checked = item.Text == settings.PollSeconds + " 秒";
                 for (int i = 0; i < values.Length; i++) ((ToolStripMenuItem)color.DropDownItems[i]).Checked = values[i] == settings.IconColor;
                 for (int i = 0; i < weightValues.Length; i++) ((ToolStripMenuItem)weight.DropDownItems[i]).Checked = weightValues[i] == settings.IconWeight;
+                for (int i = 0; i < themeValues.Length; i++) ((ToolStripMenuItem)themeMenu.DropDownItems[i]).Checked = themeValues[i] == settings.Theme;
                 notifications.Checked = settings.LowBatteryNotification;
                 startup.Checked = StartupRegistration.IsEnabled;
                 diagnostics.Enabled = !savingDiagnostics;

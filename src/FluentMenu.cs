@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 
 namespace ViperBattery
@@ -9,12 +10,15 @@ namespace ViperBattery
     internal static class FluentMenu
     {
         private static readonly FluentMenuRenderer SharedRenderer = new FluentMenuRenderer();
+        // Submenus inherit the parent's renderer, so track applied menus explicitly.
+        private static readonly ConditionalWeakTable<ToolStripDropDown, object> Applied = new ConditionalWeakTable<ToolStripDropDown, object>();
 
         internal static void Apply(ToolStripDropDown dropDown)
         {
-            if (dropDown.Renderer == SharedRenderer) return;
+            object marker;
+            if (Applied.TryGetValue(dropDown, out marker)) return;
+            Applied.Add(dropDown, new object());
             dropDown.Renderer = SharedRenderer;
-            dropDown.Padding = new Padding(0, Px(dropDown, 4), 0, Px(dropDown, 4));
             dropDown.HandleCreated += delegate { Frame(dropDown); };
             dropDown.Opening += delegate { Frame(dropDown); };
             if (dropDown.IsHandleCreated) Frame(dropDown);
@@ -77,6 +81,9 @@ namespace ViperBattery
             return graphics.DpiX / 96F;
         }
 
+        // High contrast keeps the system's own menu colors.
+        private static bool Native { get { return SystemInformation.HighContrast; } }
+
         private Font GlyphFont(float scale)
         {
             if (FluentFonts.Icons == null) return null;
@@ -91,35 +98,41 @@ namespace ViperBattery
 
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
+            if (Native) { base.OnRenderToolStripBackground(e); return; }
             using (Brush brush = new SolidBrush(FluentTheme.Current.Background))
                 e.Graphics.FillRectangle(brush, e.AffectedBounds);
         }
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
+            if (Native) { base.OnRenderToolStripBorder(e); return; }
             // Windows 11 draws the rounded border itself; Windows 10 gets a 1px stroke.
             if (RoundedByDwm) return;
             using (Pen pen = new Pen(FluentTheme.Current.WindowStroke))
                 e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
         }
 
-        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) { }
+        protected override void OnRenderImageMargin(ToolStripRenderEventArgs e)
+        {
+            if (Native) base.OnRenderImageMargin(e);
+        }
 
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
         {
+            if (Native) { base.OnRenderMenuItemBackground(e); return; }
             ToolStripMenuItem item = e.Item as ToolStripMenuItem;
             bool open = item != null && item.DropDown.Visible;
             if (!e.Item.Enabled || !(e.Item.Selected || open)) return;
             float scale = Scale(e.Graphics);
             RectangleF box = new RectangleF(4 * scale, scale, e.Item.Width - 8 * scale, e.Item.Height - 2 * scale);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            FluentDraw.FillRounded(e.Graphics, FluentTheme.Current.SubtleHover, box, 4 * scale);
+            FluentDraw.FillRounded(e.Graphics, FluentTheme.Current.HoverOn(FluentTheme.Current.Background), box, 4 * scale);
         }
 
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             FluentTheme theme = FluentTheme.Current;
-            e.TextColor = e.Item.Enabled ? theme.TextPrimary : theme.TextDisabled;
+            if (!Native) e.TextColor = e.Item.Enabled ? theme.TextPrimary : theme.TextDisabled;
             // Dropdown items place text near the top once vertical padding is added; center it on the row.
             if (e.ToolStrip is ToolStripDropDown)
             {
@@ -131,6 +144,7 @@ namespace ViperBattery
 
         protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
         {
+            if (Native) { base.OnRenderItemCheck(e); return; }
             FluentTheme theme = FluentTheme.Current;
             Font font = GlyphFont(Scale(e.Graphics));
             Rectangle box = new Rectangle(e.ImageRectangle.X, (e.Item.Height - e.ImageRectangle.Height) / 2, e.ImageRectangle.Width, e.ImageRectangle.Height);
@@ -141,6 +155,7 @@ namespace ViperBattery
 
         protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
         {
+            if (Native) { base.OnRenderArrow(e); return; }
             FluentTheme theme = FluentTheme.Current;
             Font font = GlyphFont(Scale(e.Graphics));
             Color color = e.Item != null && !e.Item.Enabled ? theme.TextDisabled : theme.TextSecondary;
@@ -162,6 +177,7 @@ namespace ViperBattery
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
+            if (Native) { base.OnRenderSeparator(e); return; }
             float scale = Scale(e.Graphics);
             int y = e.Item.Height / 2;
             using (Pen pen = new Pen(FluentTheme.Current.IsLight ? FluentTheme.Current.Divider : FluentTheme.Current.WindowStroke))

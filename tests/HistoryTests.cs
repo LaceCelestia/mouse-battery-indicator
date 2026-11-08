@@ -23,6 +23,12 @@ internal static class HistoryTests
             TestCorruptAndExpiredLines(Path.Combine(directory, "corrupt.tsv"));
             TestDailyCompaction(Path.Combine(directory, "compact.tsv"));
             TestUnwritableLocation(directory);
+            TestClockRollback();
+            TestApproximateJitter();
+            TestScanRecording();
+            TestNewestSeriesForOfflineMouse();
+            TestUnreadableLogIsNotOverwritten(Path.Combine(directory, "locked.tsv"));
+            TestOversizedLogKeepsNewest(Path.Combine(directory, "oversized.tsv"));
             Console.WriteLine("History tests passed: " + assertions + " assertions.");
             return 0;
         }
@@ -175,6 +181,109 @@ internal static class HistoryTests
         Check(history.Count("Razer|Razer Viper V3 Pro") == 1, "Samples are still available in memory.");
         history.Record(Reading(69, false), Start.AddMinutes(1));
         Check(reported == 1, "A failing log is reported once, not on every poll (" + reported + ").");
+    }
+
+    private static void TestClockRollback()
+    {
+        BatteryHistory history = new BatteryHistory(null);
+        string key = BatteryHistory.KeyFor(Reading(70, false));
+        history.Record(Reading(70, false), Start.AddHours(2));
+        // The clock jumps back one hour; polling continues every minute with an unchanged level.
+        int recorded = 0;
+        for (int minute = 0; minute < 9; minute++)
+            if (history.Record(Reading(70, false), Start.AddHours(1).AddMinutes(minute))) recorded++;
+        Check(recorded == 1, "After the clock moves back, unchanged levels are deduplicated again (" + recorded + " recorded).");
+        IList<BatterySample> all = history.Query(key, Start, Start.AddHours(3));
+        Check(all.Select(s => s.Utc).SequenceEqual(all.Select(s => s.Utc).OrderBy(t => t)), "Samples stay ordered after a rollback.");
+    }
+
+    private static void TestApproximateJitter()
+    {
+        BatteryHistory history = new BatteryHistory(null);
+        BatteryReading estimate = Reading(80, false, "MX Anywhere 3", "Logitech");
+        estimate.IsApproximate = true;
+        string key = BatteryHistory.KeyFor(estimate);
+        int recorded = 0;
+        int[] levels = { 80, 79, 80, 79, 80, 81, 80 };
+        for (int i = 0; i < levels.Length; i++)
+        {
+            estimate.Percentage = levels[i];
+            if (history.Record(estimate, Start.AddMinutes(i))) recorded++;
+        }
+        Check(recorded == 1, "A voltage estimate jittering by 1% is not logged on every poll (" + recorded + " recorded).");
+        estimate.Percentage = 77;
+        Check(history.Record(estimate, Start.AddMinutes(8)), "A real change in an estimate is still recorded immediately.");
+        estimate.Percentage = 78;
+        Check(history.Record(estimate, Start.AddMinutes(20)), "Jitter is recorded once the heartbeat has passed.");
+
+        BatteryReading exact = Reading(80, false);
+        history.Record(exact, Start);
+        exact.Percentage = 79;
+        Check(history.Record(exact, Start.AddMinutes(1)), "Exact readings record every 1% change.");
+        Check(history.Count(key) == 3, "The estimate series holds only meaningful points.");
+    }
+
+    private static void TestScanRecording()
+    {
+        BatteryHistory history = new BatteryHistory(null);
+        List<BatteryReading> scan = new List<BatteryReading> {
+            Reading(80, false, "MX Anywhere 3", "Logitech"),
+            Reading(35, false, "MX Anywhere 3", "Logitech"),
+            Reading(60, true),
+            Reading(null, null, "Offline mouse"),
+            null
+        };
+        Check(history.RecordScan(scan, Start) == 2, "One scan records each product key once.");
+        Check(history.RecordScan(scan, Start.AddMinutes(1)) == 0, "Repeating the scan adds nothing within the heartbeat.");
+        IList<BatterySample> logitech = history.Query("Logitech|MX Anywhere 3", Start, Start.AddHours(1));
+        Check(logitech.Count == 1 && logitech[0].Percent == 80, "Two mice with the same name do not interleave in one line.");
+        Check(history.RecordScan(null, Start) == 0, "A missing scan is ignored.");
+    }
+
+    private static void TestNewestSeriesForOfflineMouse()
+    {
+        BatteryHistory history = new BatteryHistory(null);
+        history.Record(Reading(50, false, "Viper", "Razer"), Start);
+        history.Record(Reading(70, false, "Viper", "Windows"), Start.AddDays(2));
+        BatteryReading offline = MouseBatteryService.Unavailable("x", "Viper", "offline");
+        Check(history.ResolveKey(offline) == "Windows|Viper", "A disconnected mouse shows its most recently used log.");
+    }
+
+    private static void TestUnreadableLogIsNotOverwritten(string path)
+    {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < 100; i++)
+            text.Append(Start.AddMinutes(-i * 10).ToString("yyyy-MM-ddTHH:mm:ssZ")).Append("\t50\t0\tRazer|Viper\n");
+        File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
+        int reported = 0;
+        BatteryHistory history;
+        // Another program (Excel, an editor) holds the log open for writing during startup.
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+            history = BatteryHistory.Load(path, Start, delegate { reported++; });
+        Check(reported == 1, "An unreadable log is reported.");
+        history.Record(Reading(49, false, "Viper", "Razer"), Start.AddMinutes(1));
+        history.Record(Reading(48, false, "Viper", "Razer"), Start.AddDays(1).AddMinutes(2));
+        int lines = File.ReadAllLines(path).Length;
+        Check(lines == 102, "The daily cleanup never rewrites a log that could not be read (" + lines + " lines).");
+    }
+
+    private static void TestOversizedLogKeepsNewest(string path)
+    {
+        StringBuilder text = new StringBuilder();
+        DateTime first = Start.AddDays(-7);
+        int count = 0;
+        while (text.Length < 4300000)
+        {
+            text.Append(first.AddSeconds(count * 9).ToString("yyyy-MM-ddTHH:mm:ssZ")).Append("\t").Append(count % 101).Append("\t0\tLogitech|A long product name for size\n");
+            count++;
+        }
+        File.WriteAllText(path, text.ToString(), new UTF8Encoding(false));
+        BatteryHistory history = BatteryHistory.Load(path, Start, delegate { });
+        int kept = history.Count("Logitech|A long product name for size");
+        Check(kept > count / 2, "An oversized log keeps its newest samples instead of starting empty (" + kept + " of " + count + ").");
+        IList<BatterySample> newest = history.Query("Logitech|A long product name for size", Start.AddDays(-1), Start);
+        Check(newest.Count > 0, "The most recent day survives trimming.");
+        Check(new FileInfo(path).Length <= 4L * 1024 * 1024, "The trimmed log is rewritten within the size limit.");
     }
 
     private static void Check(bool condition, string message)

@@ -28,6 +28,7 @@ internal static class UiTests
             TestIcons();
             TestChargingDigitConsistency();
             SaveDesignPreviews(outputDirectory);
+            TestThemePreference();
             SaveIconSheet(Path.Combine(outputDirectory, "icons.png"));
             Console.WriteLine("UI tests: " + assertions + " assertions passed. No hardware access.");
             return 0;
@@ -192,6 +193,23 @@ internal static class UiTests
         }
     }
 
+    private static void TestThemePreference()
+    {
+        if (SystemInformation.HighContrast) return;
+        try
+        {
+            FluentTheme.SetPreference("dark");
+            Assert(!FluentTheme.Current.IsLight, "Choosing the dark theme uses dark colors regardless of Windows.");
+            FluentTheme.SetPreference("light");
+            Assert(FluentTheme.Current.IsLight, "Choosing the light theme uses light colors regardless of Windows.");
+            FluentTheme.SetPreference("auto");
+            Assert(FluentTheme.Current.IsLight == FluentTheme.IsSystemLight(), "The automatic theme follows Windows.");
+            FluentTheme.SetPreference("unexpected");
+            Assert(FluentTheme.Preference == "auto", "Unknown theme values fall back to automatic.");
+        }
+        finally { FluentTheme.SetPreference("auto"); }
+    }
+
     private static BatteryHistory SampleHistory(DateTime nowUtc, out int current)
     {
         // A week of synthetic use: discharge during the day, PC off at night, and a recharge when low.
@@ -239,6 +257,8 @@ internal static class UiTests
                     popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-day.png"));
                     popup.PreviewHover(0.62);
                     popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-hover.png"));
+                    popup.PreviewHover(0.03);
+                    popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-hover-high.png"));
                     popup.ShowWeek(true);
                     popup.SavePreview(Path.Combine(outputDirectory, "design-" + theme + "-week.png"));
                     Assert(popup.WeekRange, "The week view can be selected.");
@@ -288,6 +308,8 @@ internal static class UiTests
             menu.Items.Add(new ToolStripMenuItem("診断結果を保存") { Enabled = false });
             menu.Items.Add("終了");
             FluentMenu.Apply(menu);
+            Assert(interval.DropDownItems[0].Padding.Top == menu.Items[1].Padding.Top && menu.Items[1].Padding.Top > 0,
+                "Submenus get the same row styling as the main menu.");
             IntPtr unused = menu.Handle;
             menu.Size = menu.GetPreferredSize(Size.Empty);
             menu.PerformLayout();

@@ -14,6 +14,7 @@ namespace ViperBattery
         public int PollSeconds { get; set; }
         public string IconColor { get; set; }
         public string IconWeight { get; set; }
+        public string Theme { get; set; }
         public bool LowBatteryNotification { get; set; }
         public string PreferredDeviceId { get; set; }
         public string PreferredDeviceName { get; set; }
@@ -24,6 +25,7 @@ namespace ViperBattery
             PollSeconds = 60;
             IconColor = "auto";
             IconWeight = "normal";
+            Theme = "auto";
             LowBatteryNotification = true;
             PreferredDeviceId = "";
             PreferredDeviceName = "";
@@ -137,6 +139,8 @@ namespace ViperBattery
             IconColor = color == "green" || color == "white" || color == "black" ? color : "auto";
             string weight = (IconWeight ?? "normal").Trim().ToLowerInvariant();
             IconWeight = weight == "light" || weight == "bold" ? weight : "normal";
+            string theme = (Theme ?? "auto").Trim().ToLowerInvariant();
+            Theme = theme == "light" || theme == "dark" ? theme : "auto";
         }
 
         private static void PreserveCorruptSettings(string path)

@@ -138,12 +138,18 @@ internal static class ServiceTests
             File.WriteAllText(oldFile, xml);
             AppSettings migrated = AppSettings.LoadFromDirectories(current, legacy);
             Check(migrated.PollSeconds == 30 && migrated.IconColor == "white" && migrated.IconWeight == "bold", "Legacy appearance settings migrate to the generic directory");
+            Check(migrated.Theme == "auto", "Settings saved before the theme option follow Windows");
             Check(!migrated.LowBatteryNotification && migrated.PreferredDeviceId == "razer:one", "Migration preserves notifications and selected mouse");
             Check(File.Exists(Path.Combine(current, "settings.xml")), "Migration saves settings in the new directory");
             Check(File.ReadAllText(oldFile) == xml, "Migration leaves the original settings intact");
             migrated.PollSeconds = 120;
+            migrated.Theme = "dark";
             migrated.SaveToDirectory(current);
-            Check(AppSettings.LoadFromDirectories(current, legacy).PollSeconds == 120, "Existing new settings take priority over the legacy copy");
+            AppSettings reloaded = AppSettings.LoadFromDirectories(current, legacy);
+            Check(reloaded.PollSeconds == 120, "Existing new settings take priority over the legacy copy");
+            Check(reloaded.Theme == "dark", "The chosen theme survives a restart");
+            File.WriteAllText(Path.Combine(current, "settings.xml"), "<ViperV3BatteryIndicatorSettings><Theme>neon</Theme></ViperV3BatteryIndicatorSettings>");
+            Check(AppSettings.LoadFromDirectories(current, legacy).Theme == "auto", "An unknown theme falls back to following Windows");
             Check(AppSettings.LoadFromDirectories(Path.Combine(temporary, "absent"), Path.Combine(temporary, "also-absent")).PollSeconds == 60, "Fresh installations retain defaults");
         }
         finally
